@@ -3,6 +3,7 @@
 #include "fcntl.h"
 #include "user.h"
 #include "x86.h"
+#include "mmu.h"  // PGSIZE // Code added by Greg, Shawn, and Minh, Homework 6
 
 char*
 strcpy(char *s, const char *t)
@@ -104,3 +105,89 @@ memmove(void *vdst, const void *vsrc, int n)
     *dst++ = *src++;
   return vdst;
 }
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+static inline int fetch_and_add(int* location, int value)
+{
+    __asm__ volatile("lock; xaddl %0, %1"
+      : "+r" (value), "+m" (*location) // input + output
+      : // No input-only
+      : "memory"
+    );
+    return value;
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+int thread_create(void (*start_routine)(void *, void *), void *arg1, void *arg2) {
+  // starts a new thread in the calling process
+  void *stack = malloc(PGSIZE*2);
+  if (stack == 0)
+    return -1;
+  if ((uint)stack % PGSIZE) 
+  { 
+    stack = stack + (4096 - (uint)stack % PGSIZE); // assgin the stack space
+  }
+  int r = clone(start_routine, arg1, arg2, stack); // use the clone function system call
+  if (r == -1)
+    free(stack);
+  return r;
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+int thread_join() {
+  // suspend execution of the calling thread until the target thread terminates
+  void **stack = (void**)malloc(sizeof(void**)); // allocated space
+  int pidThread = join(stack); // use the join function system call
+  if (pidThread != -1) {
+    // if stack is not allocated correctly => free stack
+    free(stack);
+  }
+
+  return pidThread;
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+void lock_init(lock_t * lock) {
+  // init the lock with ticket = 0 and turn = 0
+  lock->ticket = 0;
+  lock->turn = 0;
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+void lock_aquire(lock_t * lock) {
+  int myTurn = fetch_and_add(&lock->ticket, 1);
+  while(lock->turn != myTurn)
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that the critical section's memory
+  // references happen after the lock is acquired.
+    __sync_synchronize();
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */
+
+/* Start of code added by Greg, Shawn, Mink, Homework 6 */
+
+void lock_release(lock_t * lock) {
+  fetch_and_add(&lock->turn, 1);
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that all the stores in the critical
+  // section are visible to other cores before the lock is released.
+  // Both the C compiler and the hardware may re-order loads and
+  // stores; __sync_synchronize() tells them both not to.
+  __sync_synchronize();
+}
+
+/* End of code added by Greg, Shawn, Mink, Homework 6 */

@@ -49,10 +49,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  void *usp;                   // user stack ptr // Code added by Greg, Shawn, and Minh, Homework 6
+  int * refNum;                // reference counter // Code added by Greg, Shawn, and Minh, Homework 6
 };
 
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
-//   fixed-size stack
 //   expandable heap
+//   fixed-size stack

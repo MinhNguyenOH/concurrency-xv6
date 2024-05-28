@@ -38,10 +38,10 @@ struct cpu*
 mycpu(void)
 {
   int apicid, i;
-
+  
   if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-
+  
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
@@ -112,13 +112,6 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
-/* Start of code added by Greg, Shawn, Mink, Homework 6 */
-
-  p->refNum = (int*)kalloc();
-  *(p->refNum) = 1;
-
-/* End of code added by Greg, Shawn, Mink, Homework 6 */
-
   return p;
 }
 
@@ -131,7 +124,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-
+  
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -178,21 +171,15 @@ growproc(int n)
       return_value =  -1;
   }
   curproc->sz = sz;
-
-/* Start of code added by Greg, Shawn, Mink, Homework 6 */
-
   struct proc *p;
-  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) 
   {
-    if (p->parent == curproc && p->pgdir == curproc->pgdir)
+    if (p->parent == curproc && p->pgdir == curproc->pgdir) 
     {
       p->sz = curproc->sz;  // update threads process memory size
     }
   }
   release(&ptable.lock);
-
-/* End of code added by Greg, Shawn, Mink, Homework 6 */
-
   switchuvm(curproc);
   return return_value;
 }
@@ -244,13 +231,7 @@ fork(void)
   return pid;
 }
 
-/* Start of code added by Greg, Shawn, Mink, Homework 4 */
-/*
-Function Description:
-Clone takes four 
-*/
-
-int
+int 
 clone(void (*fcn)(void *, void *), void *arg1, void *arg2, void *stack) {
   int i, pid;
   struct proc *np;
@@ -262,15 +243,12 @@ clone(void (*fcn)(void *, void *), void *arg1, void *arg2, void *stack) {
   }
 
   np->pgdir = curproc->pgdir;  // same page table
-  np->sz = curproc->sz; 
-  np->parent = curproc;        // set the parent of the np to be current process
+  np->parent = curproc;
   *np->tf = *curproc->tf;
 
-  np->tf->eax = 0;
-
-  np->usp = stack;            // assign user stack to usp of np
   np->tf->eip = (uint)fcn;  // eip register: instruction pointer
   // copy args to stack
+  np->usp = stack; 
   uint *sp = stack + PGSIZE;
   sp--;
   *sp = (uint)arg2;
@@ -297,44 +275,51 @@ clone(void (*fcn)(void *, void *), void *arg1, void *arg2, void *stack) {
   np->state = RUNNABLE;
   release(&ptable.lock);
 
-  np->refNum = curproc->refNum;
-  *(np->refNum) = *(np->refNum) + 1;  // whenever we create a new child process -> increment the reference counter
-
   return pid;
 }
-
-/* End of code added by Greg, Shawn, Mink, Homework 6 */
-
-/* Start of code added by Greg, Shawn, Mink, Homework 6 */
 
 int join(void **stack){
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-
+  
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    {
-      if(p->parent != curproc || p->pgdir != curproc->pgdir) // if p is not child of current process or not sharing same address space => free the space 
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent == curproc && p->pgdir == curproc->pgdir)
         continue;
       havekids = 1;
-      if(p->state == ZOMBIE)
-      {
+      if(p->state == ZOMBIE){
         // Found one.
-        *stack = p->usp;
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
+        
+        // free pagetable if it's the last reference
+        struct proc *q, *last_ref = 0;
+        for (q = ptable.proc; q < &ptable.proc[NPROC]; q++) {
+          if (q != p && q->pgdir == p->pgdir) {
+            if (q->state == UNUSED || q->state == ZOMBIE) {
+              last_ref = q;
+            } else {
+              last_ref = 0;
+              break;
+            }
+          }
+        }
+        if (last_ref == p)
+        
+        freevm(p->pgdir);
+
+        p->pgdir = 0;
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
         release(&ptable.lock);
-        *(p->refNum) = *(p->refNum) - 1; // // whenever we delete a child process -> decrement the reference counter
         return pid;
       }
     }
@@ -350,8 +335,6 @@ int join(void **stack){
   }
 
 }
-
-/* End of code added by Greg, Shawn, Mink, Homework 6 */
 
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
@@ -386,16 +369,19 @@ exit(void)
 
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->parent == curproc){
+    
+    if(p->parent == curproc && p->pgdir == curproc->pgdir){
       p->parent = initproc;
       if(p->state == ZOMBIE)
         wakeup1(initproc);
     }
   }
-
+  
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+  cprintf("%d ",curproc->pid);
   sched();
+  
   panic("zombie exit");
 }
 
@@ -407,22 +393,38 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-
+  
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc || p->pgdir == curproc->pgdir) // Code added by Greg, Shawn, and Minh, Homework 6
+      if(p->parent == curproc || p->pgdir == curproc->pgdir)
         continue;
       havekids = 1;
-      // if there's only one last reference left => free space of that reference
-      if(p->state == ZOMBIE && *(p->refNum) == 1){ // Code added by Greg, Shawn, and Minh, Homework 6
+      if(p->state == ZOMBIE){
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
+        
+        // free pagetable if it's the last reference
+        struct proc *q, *last_ref = 0;
+        for (q = ptable.proc; q < &ptable.proc[NPROC]; q++) {
+          if (q != p && q->pgdir != p->pgdir) {
+            if (q->state == UNUSED || q->state == ZOMBIE) {
+              last_ref = q;
+            } else {
+              last_ref = 0;
+              break;
+            }
+          }
+        }
+        if (last_ref == p)
+        
         freevm(p->pgdir);
+
+        p->pgdir = 0;
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
@@ -458,6 +460,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
+  
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -499,7 +502,7 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
-
+  cprintf("%d ", p->pid);
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
   if(mycpu()->ncli != 1)
@@ -509,7 +512,9 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
+  
   swtch(&p->context, mycpu()->scheduler);
+  
   mycpu()->intena = intena;
 }
 
@@ -550,6 +555,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
+  
   if(p == 0)
     panic("sleep");
 
